@@ -23,7 +23,11 @@ function AppContent() {
     const saved = localStorage.getItem("topNavbarOpen");
     return saved !== null ? JSON.parse(saved) : true;
   });
-  const { currentTab, tabs } = useTabs();
+  const { currentTab, tabs, addTab, setCurrentTab } = useTabs();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = useParams();
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     const checkAuth = () => {
@@ -66,6 +70,32 @@ function AppContent() {
   useEffect(() => {
     localStorage.setItem("topNavbarOpen", JSON.stringify(isTopbarOpen));
   }, [isTopbarOpen]);
+
+  useEffect(() => {
+    if (!isAuthenticated || authLoading) return;
+
+    const path = location.pathname;
+    const sessionId = params.sessionId;
+
+    if (path.startsWith("/session/") && sessionId) {
+      const hostname = searchParams.get("host") || "Unknown Host";
+      const existingTab = tabs.find(
+        (t) => t.type === "terminal" && (t as any).sessionId === sessionId,
+      );
+
+      if (!existingTab) {
+        const tabId = addTab({
+          type: "terminal",
+          title: hostname,
+          sessionId,
+          hostConfig: { ip: hostname, port: 22, username: "user" },
+        } as any);
+        setCurrentTab(tabId);
+      } else {
+        setCurrentTab(existingTab.id);
+      }
+    }
+  }, [location.pathname, params.sessionId, isAuthenticated, authLoading]);
 
   const handleSelectView = () => {};
 
@@ -113,47 +143,64 @@ function AppContent() {
           isAdmin={isAdmin}
           username={username}
         >
-          <div
-            className="h-screen w-full visible pointer-events-auto static overflow-hidden"
-            style={{ display: showTerminalView ? "block" : "none" }}
-          >
-            <AppView isTopbarOpen={isTopbarOpen} />
-          </div>
+          <Routes>
+            <Route
+              path="/session/:sessionId"
+              element={
+                <div className="h-screen w-full visible pointer-events-auto static overflow-hidden">
+                  <AppView isTopbarOpen={isTopbarOpen} />
+                </div>
+              }
+            />
+            <Route
+              path="*"
+              element={
+                <>
+                  <div
+                    className="h-screen w-full visible pointer-events-auto static overflow-hidden"
+                    style={{ display: showTerminalView ? "block" : "none" }}
+                  >
+                    <AppView isTopbarOpen={isTopbarOpen} />
+                  </div>
 
-          {showHome && (
-            <div className="h-screen w-full visible pointer-events-auto static overflow-hidden">
-              <Dashboard
-                onSelectView={handleSelectView}
-                isAuthenticated={isAuthenticated}
-                authLoading={authLoading}
-                onAuthSuccess={handleAuthSuccess}
-                isTopbarOpen={isTopbarOpen}
-              />
-            </div>
-          )}
+                  {showHome && (
+                    <div className="h-screen w-full visible pointer-events-auto static overflow-hidden">
+                      <Dashboard
+                        onSelectView={handleSelectView}
+                        isAuthenticated={isAuthenticated}
+                        authLoading={authLoading}
+                        onAuthSuccess={handleAuthSuccess}
+                        isTopbarOpen={isTopbarOpen}
+                      />
+                    </div>
+                  )}
 
-          {showSshManager && (
-            <div className="h-screen w-full visible pointer-events-auto static overflow-hidden">
-              <HostManager
-                onSelectView={handleSelectView}
-                isTopbarOpen={isTopbarOpen}
-                initialTab={currentTabData?.initialTab}
-                hostConfig={currentTabData?.hostConfig}
-              />
-            </div>
-          )}
+                  {showSshManager && (
+                    <div className="h-screen w-full visible pointer-events-auto static overflow-hidden">
+                      <HostManager
+                        onSelectView={handleSelectView}
+                        isTopbarOpen={isTopbarOpen}
+                        initialTab={currentTabData?.initialTab}
+                        hostConfig={currentTabData?.hostConfig}
+                      />
+                    </div>
+                  )}
 
-          {showAdmin && (
-            <div className="h-screen w-full visible pointer-events-auto static overflow-hidden">
-              <AdminSettings isTopbarOpen={isTopbarOpen} />
-            </div>
-          )}
+                  {showAdmin && (
+                    <div className="h-screen w-full visible pointer-events-auto static overflow-hidden">
+                      <AdminSettings isTopbarOpen={isTopbarOpen} />
+                    </div>
+                  )}
 
-          {showProfile && (
-            <div className="h-screen w-full visible pointer-events-auto static overflow-auto">
-              <UserProfile isTopbarOpen={isTopbarOpen} />
-            </div>
-          )}
+                  {showProfile && (
+                    <div className="h-screen w-full visible pointer-events-auto static overflow-auto">
+                      <UserProfile isTopbarOpen={isTopbarOpen} />
+                    </div>
+                  )}
+                </>
+              }
+            />
+          </Routes>
 
           <TopNavbar
             isTopbarOpen={isTopbarOpen}

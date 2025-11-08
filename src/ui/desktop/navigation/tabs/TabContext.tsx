@@ -122,6 +122,16 @@ export function TabProvider({ children }: TabProviderProps) {
       }
     }
 
+    if (tabData.type === "terminal" && (tabData as any).sessionId) {
+      const existingTab = tabs.find(
+        (t) => t.type === "terminal" && (t as any).sessionId === (tabData as any).sessionId,
+      );
+      if (existingTab) {
+        setCurrentTab(existingTab.id);
+        return existingTab.id;
+      }
+    }
+
     const id = nextTabId.current++;
     const needsUniqueTitle =
       tabData.type === "terminal" ||
