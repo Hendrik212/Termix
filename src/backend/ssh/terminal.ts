@@ -14,10 +14,12 @@ import { sshLogger } from "../utils/logger.js";
 import { SimpleDBOps } from "../utils/simple-db-ops.js";
 import { AuthManager } from "../utils/auth-manager.js";
 import { UserCrypto } from "../utils/user-crypto.js";
+import { SessionManager } from "./session-manager.js";
 
 interface ConnectToHostData {
   cols: number;
   rows: number;
+  sessionId?: string;
   hostConfig: {
     id: number;
     ip: string;
@@ -54,8 +56,10 @@ interface WebSocketMessage {
 
 const authManager = AuthManager.getInstance();
 const userCrypto = UserCrypto.getInstance();
+const sessionManager = SessionManager.getInstance();
 
 const userConnections = new Map<string, Set<WebSocket>>();
+const wsToSession = new Map<WebSocket, string>();
 
 const wss = new WebSocketServer({
   port: 30002,
@@ -162,6 +166,12 @@ wss.on("connection", async (ws: WebSocket, req) => {
       }
     }
 
+    const sessionId = wsToSession.get(ws);
+    if (sessionId) {
+      sessionManager.detachClient(sessionId, ws);
+      wsToSession.delete(ws);
+    }
+
     cleanupSSH();
   });
 
@@ -200,22 +210,93 @@ wss.on("connection", async (ws: WebSocket, req) => {
         if (connectData.hostConfig) {
           connectData.hostConfig.userId = userId;
         }
-        handleConnectToHost(connectData).catch((error) => {
-          sshLogger.error("Failed to connect to host", error, {
-            operation: "ssh_connect",
-            userId,
-            hostId: connectData.hostConfig?.id,
-            ip: connectData.hostConfig?.ip,
-          });
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              message:
-                "Failed to connect to host: " +
-                (error instanceof Error ? error.message : "Unknown error"),
-            }),
-          );
-        });
+
+        if (connectData.sessionId) {
+          sessionManager
+            .attachClient(connectData.sessionId, ws, userId)
+            .then(async (attached) => {
+              if (!attached) {
+                ws.send(
+                  JSON.stringify({
+                    type: "error",
+                    message: "Session not found or unauthorized",
+                  }),
+                );
+                return;
+              }
+
+              wsToSession.set(ws, connectData.sessionId!);
+
+              const scrollback = sessionManager.getScrollback(
+                connectData.sessionId!,
+              );
+              ws.send(
+                JSON.stringify({
+                  type: "session_attached",
+                  sessionId: connectData.sessionId,
+                  scrollback,
+                }),
+              );
+
+              const session = sessionManager.getSession(connectData.sessionId!);
+              if (session && session.sshStream) {
+                ws.send(
+                  JSON.stringify({ type: "connected", message: "SSH connected" }),
+                );
+              } else {
+                await handleConnectToHost(connectData);
+              }
+            })
+            .catch((error) => {
+              sshLogger.error("Failed to attach to session", error, {
+                operation: "session_attach",
+                userId,
+                sessionId: connectData.sessionId,
+              });
+              ws.send(
+                JSON.stringify({
+                  type: "error",
+                  message: "Failed to attach to session",
+                }),
+              );
+            });
+        } else {
+          sessionManager
+            .createSession(
+              userId,
+              connectData.hostConfig,
+              connectData.hostConfig.name,
+            )
+            .then(async (sessionId) => {
+              wsToSession.set(ws, sessionId);
+              await sessionManager.attachClient(sessionId, ws, userId);
+
+              ws.send(
+                JSON.stringify({
+                  type: "session_created",
+                  sessionId,
+                }),
+              );
+
+              await handleConnectToHost({
+                ...connectData,
+                sessionId,
+              });
+            })
+            .catch((error) => {
+              sshLogger.error("Failed to create session", error, {
+                operation: "session_create",
+                userId,
+                hostId: connectData.hostConfig?.id,
+              });
+              ws.send(
+                JSON.stringify({
+                  type: "error",
+                  message: "Failed to create session",
+                }),
+              );
+            });
+        }
         break;
       }
 
@@ -229,26 +310,42 @@ wss.on("connection", async (ws: WebSocket, req) => {
         cleanupSSH();
         break;
 
+      case "terminate_session": {
+        const sessionId = wsToSession.get(ws);
+        if (sessionId) {
+          await sessionManager.terminateSession(sessionId);
+          wsToSession.delete(ws);
+        }
+        cleanupSSH();
+        break;
+      }
+
       case "input": {
         const inputData = data as string;
-        if (sshStream) {
+        const sessionId = wsToSession.get(ws);
+        const session = sessionId
+          ? sessionManager.getSession(sessionId)
+          : null;
+        const targetStream = session?.sshStream || sshStream;
+
+        if (targetStream) {
           if (inputData === "\t") {
-            sshStream.write(inputData);
+            targetStream.write(inputData);
           } else if (
             typeof inputData === "string" &&
             inputData.startsWith("\x1b")
           ) {
-            sshStream.write(inputData);
+            targetStream.write(inputData);
           } else {
             try {
-              sshStream.write(Buffer.from(inputData, "utf8"));
+              targetStream.write(Buffer.from(inputData, "utf8"));
             } catch (error) {
               sshLogger.error("Error writing input to SSH stream", error, {
                 operation: "ssh_input_encoding",
                 userId,
                 dataLength: inputData.length,
               });
-              sshStream.write(Buffer.from(inputData, "latin1"));
+              targetStream.write(Buffer.from(inputData, "latin1"));
             }
           }
         }
@@ -545,22 +642,40 @@ wss.on("connection", async (ws: WebSocket, req) => {
 
           sshStream = stream;
 
+          const sessionId = wsToSession.get(ws);
+          if (sessionId) {
+            sessionManager.setSSHConnection(sessionId, sshConn, stream);
+          }
+
           stream.on("data", (data: Buffer) => {
             try {
               const utf8String = data.toString("utf-8");
-              ws.send(JSON.stringify({ type: "data", data: utf8String }));
+              const message = JSON.stringify({ type: "data", data: utf8String });
+
+              if (sessionId) {
+                sessionManager.addToScrollback(sessionId, utf8String);
+                sessionManager.broadcastToSession(sessionId, message);
+              } else {
+                ws.send(message);
+              }
             } catch (error) {
               sshLogger.error("Error encoding terminal data", error, {
                 operation: "terminal_data_encoding",
                 hostId: id,
                 dataLength: data.length,
               });
-              ws.send(
-                JSON.stringify({
-                  type: "data",
-                  data: data.toString("latin1"),
-                }),
-              );
+              const latin1String = data.toString("latin1");
+              const message = JSON.stringify({
+                type: "data",
+                data: latin1String,
+              });
+
+              if (sessionId) {
+                sessionManager.addToScrollback(sessionId, latin1String);
+                sessionManager.broadcastToSession(sessionId, message);
+              } else {
+                ws.send(message);
+              }
             }
           });
 
@@ -603,9 +718,17 @@ wss.on("connection", async (ws: WebSocket, req) => {
             }, 500);
           }
 
-          ws.send(
-            JSON.stringify({ type: "connected", message: "SSH connected" }),
-          );
+          const sessionId = wsToSession.get(ws);
+          const connectedMessage = JSON.stringify({
+            type: "connected",
+            message: "SSH connected",
+          });
+
+          if (sessionId) {
+            sessionManager.broadcastToSession(sessionId, connectedMessage);
+          } else {
+            ws.send(connectedMessage);
+          }
 
           if (id && hostConfig.userId) {
             (async () => {
@@ -973,11 +1096,23 @@ wss.on("connection", async (ws: WebSocket, req) => {
   }
 
   function handleResize(data: ResizeData) {
-    if (sshStream && sshStream.setWindow) {
-      sshStream.setWindow(data.rows, data.cols, data.rows, data.cols);
-      ws.send(
-        JSON.stringify({ type: "resized", cols: data.cols, rows: data.rows }),
-      );
+    const sessionId = wsToSession.get(ws);
+    const session = sessionId ? sessionManager.getSession(sessionId) : null;
+    const targetStream = session?.sshStream || sshStream;
+
+    if (targetStream && targetStream.setWindow) {
+      targetStream.setWindow(data.rows, data.cols, data.rows, data.cols);
+      const message = JSON.stringify({
+        type: "resized",
+        cols: data.cols,
+        rows: data.rows,
+      });
+
+      if (sessionId) {
+        sessionManager.broadcastToSession(sessionId, message);
+      } else {
+        ws.send(message);
+      }
     }
   }
 

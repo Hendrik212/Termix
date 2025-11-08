@@ -7,10 +7,12 @@ import { eq, and, desc } from "drizzle-orm";
 import { dashboardLogger } from "./utils/logger.js";
 import { SimpleDBOps } from "./utils/simple-db-ops.js";
 import { AuthManager } from "./utils/auth-manager.js";
+import { SessionManager } from "./ssh/session-manager.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
 const app = express();
 const authManager = AuthManager.getInstance();
+const sessionManager = SessionManager.getInstance();
 
 const serverStartTime = Date.now();
 
@@ -230,6 +232,111 @@ app.delete("/activity/reset", async (req, res) => {
   } catch (err) {
     dashboardLogger.error("Failed to reset activity", err);
     res.status(500).json({ error: "Failed to reset activity" });
+  }
+});
+
+app.get("/sessions", async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).userId;
+
+    if (!SimpleDBOps.isUserDataUnlocked(userId)) {
+      return res.status(401).json({
+        error: "Session expired - please log in again",
+        code: "SESSION_EXPIRED",
+      });
+    }
+
+    const sessions = await sessionManager.getUserSessions(userId);
+    res.json(sessions);
+  } catch (err) {
+    dashboardLogger.error("Failed to get sessions", err);
+    res.status(500).json({ error: "Failed to get sessions" });
+  }
+});
+
+app.get("/sessions/:id", async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).userId;
+
+    if (!SimpleDBOps.isUserDataUnlocked(userId)) {
+      return res.status(401).json({
+        error: "Session expired - please log in again",
+        code: "SESSION_EXPIRED",
+      });
+    }
+
+    const sessionId = req.params.id;
+    const session = sessionManager.getSession(sessionId);
+
+    if (!session || session.userId !== userId) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    res.json({
+      id: session.id,
+      userId: session.userId,
+      hostConfig: session.hostConfig,
+      sessionName: session.sessionName,
+      createdAt: session.createdAt.toISOString(),
+      lastAccessedAt: session.lastAccessedAt.toISOString(),
+      status: session.status,
+      connectedClients: session.connectedClients.size,
+    });
+  } catch (err) {
+    dashboardLogger.error("Failed to get session", err);
+    res.status(500).json({ error: "Failed to get session" });
+  }
+});
+
+app.delete("/sessions/:id", async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).userId;
+
+    if (!SimpleDBOps.isUserDataUnlocked(userId)) {
+      return res.status(401).json({
+        error: "Session expired - please log in again",
+        code: "SESSION_EXPIRED",
+      });
+    }
+
+    const sessionId = req.params.id;
+    const session = sessionManager.getSession(sessionId);
+
+    if (!session || session.userId !== userId) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    await sessionManager.terminateSession(sessionId);
+    res.json({ message: "Session terminated" });
+  } catch (err) {
+    dashboardLogger.error("Failed to terminate session", err);
+    res.status(500).json({ error: "Failed to terminate session" });
+  }
+});
+
+app.get("/sessions/:id/scrollback", async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).userId;
+
+    if (!SimpleDBOps.isUserDataUnlocked(userId)) {
+      return res.status(401).json({
+        error: "Session expired - please log in again",
+        code: "SESSION_EXPIRED",
+      });
+    }
+
+    const sessionId = req.params.id;
+    const session = sessionManager.getSession(sessionId);
+
+    if (!session || session.userId !== userId) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const scrollback = sessionManager.getScrollback(sessionId);
+    res.json({ scrollback });
+  } catch (err) {
+    dashboardLogger.error("Failed to get scrollback", err);
+    res.status(500).json({ error: "Failed to get scrollback" });
   }
 });
 

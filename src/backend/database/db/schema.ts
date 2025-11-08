@@ -223,3 +223,23 @@ export const recentActivity = sqliteTable("recent_activity", {
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const terminalSessions = sqliteTable("terminal_sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  hostId: integer("host_id").references(() => sshData.id),
+  hostConfig: text("host_config").notNull(),
+  sessionName: text("session_name"),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  lastAccessedAt: text("last_accessed_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  scrollbackBuffer: text("scrollback_buffer"),
+  status: text("status").notNull().default("active"),
+  currentDirectory: text("current_directory"),
+  connectedClients: integer("connected_clients").notNull().default(0),
+});

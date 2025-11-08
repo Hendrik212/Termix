@@ -285,6 +285,22 @@ async function initializeCompleteDatabase(): Promise<void> {
         FOREIGN KEY (host_id) REFERENCES ssh_data (id)
     );
 
+    CREATE TABLE IF NOT EXISTS terminal_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        host_id INTEGER,
+        host_config TEXT NOT NULL,
+        session_name TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_accessed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        scrollback_buffer TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        current_directory TEXT,
+        connected_clients INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users (id),
+        FOREIGN KEY (host_id) REFERENCES ssh_data (id)
+    );
+
 `);
 
   try {
