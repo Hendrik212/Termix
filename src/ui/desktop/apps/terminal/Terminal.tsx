@@ -4,6 +4,7 @@ import {
   useState,
   useImperativeHandle,
   forwardRef,
+  useMemo,
 } from "react";
 import { useXTerm } from "react-xtermjs";
 import { FitAddon } from "@xterm/addon-fit";
@@ -135,6 +136,18 @@ export const Terminal = forwardRef<TerminalHandle, SSHTerminalProps>(
     const pendingSizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const notifyTimerRef = useRef<NodeJS.Timeout | null>(null);
     const DEBOUNCE_MS = 140;
+
+    const stableHostConfig = useMemo(
+      () => hostConfig,
+      [
+        hostConfig.id,
+        hostConfig.ip,
+        hostConfig.port,
+        hostConfig.username,
+        hostConfig.authType,
+        JSON.stringify(hostConfig.terminalConfig || {}),
+      ],
+    );
 
     const logTerminalActivity = async () => {
       if (
@@ -800,7 +813,7 @@ export const Terminal = forwardRef<TerminalHandle, SSHTerminalProps>(
 
       const config = {
         ...DEFAULT_TERMINAL_CONFIG,
-        ...hostConfig.terminalConfig,
+        ...stableHostConfig.terminalConfig,
       };
 
       const themeColors =
@@ -983,10 +996,10 @@ export const Terminal = forwardRef<TerminalHandle, SSHTerminalProps>(
         }
         webSocketRef.current?.close();
       };
-    }, [xtermRef, terminal, hostConfig]);
+    }, [xtermRef, terminal, stableHostConfig]);
 
     useEffect(() => {
-      if (!terminal || !hostConfig || !visible) return;
+      if (!terminal || !stableHostConfig || !visible) return;
 
       if (isConnected || isConnecting) return;
 
@@ -1028,7 +1041,7 @@ export const Terminal = forwardRef<TerminalHandle, SSHTerminalProps>(
           connectToHost(cols, rows);
         });
       });
-    }, [terminal, hostConfig, visible, isConnected, isConnecting, splitScreen]);
+    }, [terminal, stableHostConfig, visible, isConnected, isConnecting, splitScreen]);
 
     useEffect(() => {
       if (!isVisible || !isReady || !fitAddonRef.current || !terminal) {
