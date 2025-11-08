@@ -59,6 +59,8 @@ interface SSHTerminalProps {
   onClose?: () => void;
   initialPath?: string;
   executeCommand?: string;
+  sessionId?: string;
+  onSessionCreated?: (sessionId: string) => void;
 }
 
 export const Terminal = forwardRef<TerminalHandle, SSHTerminalProps>(
@@ -70,6 +72,8 @@ export const Terminal = forwardRef<TerminalHandle, SSHTerminalProps>(
       onClose,
       initialPath,
       executeCommand,
+      sessionId: propSessionId,
+      onSessionCreated,
     },
     ref,
   ) {
@@ -123,6 +127,9 @@ export const Terminal = forwardRef<TerminalHandle, SSHTerminalProps>(
     const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const activityLoggedRef = useRef(false);
     const activityLoggingRef = useRef(false);
+    const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(
+      propSessionId,
+    );
 
     const lastSentSizeRef = useRef<{ cols: number; rows: number } | null>(null);
     const pendingSizeRef = useRef<{ cols: number; rows: number } | null>(null);
@@ -503,7 +510,14 @@ export const Terminal = forwardRef<TerminalHandle, SSHTerminalProps>(
         ws.send(
           JSON.stringify({
             type: "connectToHost",
-            data: { cols, rows, hostConfig, initialPath, executeCommand },
+            data: {
+              cols,
+              rows,
+              hostConfig,
+              initialPath,
+              executeCommand,
+              sessionId: currentSessionId,
+            },
           }),
         );
         terminal.onData((data) => {
@@ -568,6 +582,25 @@ export const Terminal = forwardRef<TerminalHandle, SSHTerminalProps>(
             }
 
             toast.error(t("terminal.error", { message: errorMessage }));
+          } else if (msg.type === "session_created") {
+            const newSessionId = msg.sessionId;
+            if (newSessionId) {
+              setCurrentSessionId(newSessionId);
+              if (onSessionCreated) {
+                onSessionCreated(newSessionId);
+              }
+            }
+          } else if (msg.type === "session_attached") {
+            const sessionId = msg.sessionId;
+            const scrollback = msg.scrollback;
+            if (sessionId) {
+              setCurrentSessionId(sessionId);
+            }
+            if (scrollback && Array.isArray(scrollback) && terminal) {
+              scrollback.forEach((line: string) => {
+                terminal.write(line);
+              });
+            }
           } else if (msg.type === "connected") {
             setIsConnected(true);
             setIsConnecting(false);

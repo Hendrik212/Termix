@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { StrictMode, useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 import "./index.css";
 import DesktopApp from "@/ui/desktop/DesktopApp.tsx";
 import { MobileApp } from "@/ui/mobile/MobileApp.tsx";
@@ -109,8 +110,10 @@ function RootApp() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-      <RootApp />
-    </ThemeProvider>
+    <BrowserRouter>
+      <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+        <RootApp />
+      </ThemeProvider>
+    </BrowserRouter>
   </StrictMode>,
 );
