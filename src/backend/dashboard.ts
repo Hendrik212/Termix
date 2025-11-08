@@ -254,9 +254,9 @@ app.get("/sessions", async (req, res) => {
   }
 });
 
-app.get("/sessions/:id", async (req, res) => {
+app.get("/sessions/:id", async (req: AuthenticatedRequest, res) => {
   try {
-    const userId = (req as AuthenticatedRequest).userId;
+    const userId = req.userId;
 
     if (!SimpleDBOps.isUserDataUnlocked(userId)) {
       return res.status(401).json({
@@ -288,9 +288,9 @@ app.get("/sessions/:id", async (req, res) => {
   }
 });
 
-app.delete("/sessions/:id", async (req, res) => {
+app.delete("/sessions/:id", async (req: AuthenticatedRequest, res) => {
   try {
-    const userId = (req as AuthenticatedRequest).userId;
+    const userId = req.userId;
 
     if (!SimpleDBOps.isUserDataUnlocked(userId)) {
       return res.status(401).json({
@@ -314,9 +314,9 @@ app.delete("/sessions/:id", async (req, res) => {
   }
 });
 
-app.get("/sessions/:id/scrollback", async (req, res) => {
+app.get("/sessions/:id/scrollback", async (req: AuthenticatedRequest, res) => {
   try {
-    const userId = (req as AuthenticatedRequest).userId;
+    const userId = req.userId;
 
     if (!SimpleDBOps.isUserDataUnlocked(userId)) {
       return res.status(401).json({

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Terminal } from "@/ui/desktop/apps/terminal/Terminal.tsx";
 import { Server as ServerView } from "@/ui/desktop/apps/server/Server.tsx";
 import { FileManager } from "@/ui/desktop/apps/file-manager/FileManager.tsx";
@@ -47,6 +48,7 @@ export function AppView({
     removeTab: (id: number) => void;
   };
   const { state: sidebarState } = useSidebar();
+  const navigate = useNavigate();
 
   const terminalTabs = useMemo(
     () =>
@@ -283,6 +285,11 @@ export function AppView({
                     showTitle={false}
                     splitScreen={allSplitScreenTab.length > 0}
                     onClose={() => removeTab(t.id)}
+                    sessionId={(t as any).sessionId}
+                    onSessionCreated={(sessionId) => {
+                      const hostname = t.hostConfig?.name || t.hostConfig?.ip || "Unknown";
+                      navigate(`/session/${sessionId}?host=${encodeURIComponent(hostname)}`);
+                    }}
                   />
                 ) : t.type === "server" ? (
                   <ServerView

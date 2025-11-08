@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Routes, Route, useNavigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { LeftSidebar } from "@/ui/desktop/navigation/LeftSidebar.tsx";
 import { Dashboard } from "@/ui/desktop/apps/dashboard/Dashboard.tsx";
@@ -26,8 +26,8 @@ function AppContent() {
   const { currentTab, tabs, addTab, setCurrentTab } = useTabs();
   const location = useLocation();
   const navigate = useNavigate();
-  const params = useParams();
   const [searchParams] = useSearchParams();
+  const processedSessionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const checkAuth = () => {
@@ -72,18 +72,83 @@ function AppContent() {
   }, [isTopbarOpen]);
 
   useEffect(() => {
-    if (!isAuthenticated || authLoading) return;
+    // Extract sessionId from pathname since useParams() doesn't work here
+    const match = location.pathname.match(/^\/session\/([^/?]+)/);
+    const sessionId = match ? match[1] : null;
+
+    console.log("[DesktopApp useEffect] Triggered", {
+      isAuthenticated,
+      authLoading,
+      pathname: location.pathname,
+      extractedSessionId: sessionId,
+      tabCount: tabs.length,
+    });
+
+    if (!isAuthenticated || authLoading) {
+      console.log("[DesktopApp] Skipping - not authenticated or loading");
+      return;
+    }
+
+    if (!sessionId) {
+      console.log("[DesktopApp] No sessionId in URL");
+      return;
+    }
+
+    // Check if tab already exists for this session
+    const existingTab = tabs.find(
+      (t) => t.type === "terminal" && (t as any).sessionId === sessionId,
+    );
+
+    if (existingTab) {
+      console.log("[DesktopApp] Tab already exists for session:", sessionId);
+      if (currentTab !== existingTab.id) {
+        setCurrentTab(existingTab.id);
+      }
+      return;
+    }
+
+    // Check if we're already fetching this session
+    if (processedSessionsRef.current.has(sessionId)) {
+      console.log("[DesktopApp] Session fetch already in progress:", sessionId);
+      return;
+    }
 
     const path = location.pathname;
-    const sessionId = params.sessionId;
+    console.log("[DesktopApp] Fetching session data for:", sessionId);
+    processedSessionsRef.current.add(sessionId);
 
-    if (path.startsWith("/session/") && sessionId) {
-      const hostname = searchParams.get("host") || "Unknown Host";
-      const existingTab = tabs.find(
-        (t) => t.type === "terminal" && (t as any).sessionId === sessionId,
-      );
-
-      if (!existingTab) {
+    // Fetch session details from backend
+    fetch(`http://${window.location.hostname}:30006/sessions/${sessionId}`, {
+      credentials: "include",
+    })
+      .then((res) => {
+        console.log("[DesktopApp] Session fetch response:", res.status);
+        if (!res.ok) {
+          throw new Error(`Failed to fetch session: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((session) => {
+        console.log("[DesktopApp] Session data received:", session);
+        const hostname =
+          session.hostConfig?.name ||
+          session.sessionName ||
+          searchParams.get("host") ||
+          "Terminal Session";
+        const tabId = addTab({
+          type: "terminal",
+          title: hostname,
+          sessionId,
+          hostConfig: session.hostConfig,
+        } as any);
+        setCurrentTab(tabId);
+      })
+      .catch((error) => {
+        console.error("[DesktopApp] Failed to load session:", error);
+        // Remove from processed set on error so it can be retried
+        processedSessionsRef.current.delete(sessionId);
+        // Fallback to basic tab creation
+        const hostname = searchParams.get("host") || "Terminal Session";
         const tabId = addTab({
           type: "terminal",
           title: hostname,
@@ -91,11 +156,8 @@ function AppContent() {
           hostConfig: { ip: hostname, port: 22, username: "user" },
         } as any);
         setCurrentTab(tabId);
-      } else {
-        setCurrentTab(existingTab.id);
-      }
-    }
-  }, [location.pathname, params.sessionId, isAuthenticated, authLoading]);
+      });
+  }, [location.pathname, isAuthenticated, authLoading, tabs, currentTab]);
 
   const handleSelectView = () => {};
 

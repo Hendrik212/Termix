@@ -22,6 +22,7 @@ interface ConnectToHostData {
   sessionId?: string;
   hostConfig: {
     id: number;
+    name?: string;
     ip: string;
     port: number;
     username: string;
@@ -175,7 +176,7 @@ wss.on("connection", async (ws: WebSocket, req) => {
     cleanupSSH();
   });
 
-  ws.on("message", (msg: RawData) => {
+  ws.on("message", async (msg: RawData) => {
     const currentDataKey = userCrypto.getUserDataKey(userId);
     if (!currentDataKey) {
       ws.send(
@@ -642,7 +643,7 @@ wss.on("connection", async (ws: WebSocket, req) => {
 
           sshStream = stream;
 
-          const sessionId = wsToSession.get(ws);
+          let sessionId = wsToSession.get(ws);
           if (sessionId) {
             sessionManager.setSSHConnection(sessionId, sshConn, stream);
           }
@@ -718,7 +719,7 @@ wss.on("connection", async (ws: WebSocket, req) => {
             }, 500);
           }
 
-          const sessionId = wsToSession.get(ws);
+          sessionId = wsToSession.get(ws);
           const connectedMessage = JSON.stringify({
             type: "connected",
             message: "SSH connected",
